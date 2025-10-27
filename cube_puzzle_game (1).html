@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Кубічна головоломка</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+      color: #2e7d32;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.5rem;
+    }
+
+    #message {
+      font-size: 1.2rem;
+      margin: 1rem;
+      height: 1.5rem;
+      transition: opacity 0.5s;
+    }
+
+    #numbers {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    .num-btn {
+      font-size: 1.5rem;
+      padding: 1rem 1.2rem;
+      border: none;
+      border-radius: 10px;
+      background-color: #a5d6a7;
+      color:#2e7d32;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .num-btn.active {
+      background-color: #66bb6a;
+      color: white;
+      transform: scale(1.1);
+      box-shadow: 0 0 20px rgba(102,187,106,0.6);
+    }
+
+    #controls {
+      margin-top: 2rem;
+    }
+
+    button {
+      font-size: 1.1rem;
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      border: none;
+      background-color: #66bb6a;
+      color: white;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    button:hover {
+      background-color: #388e3c;
+      transform: scale(1.05);
+    }
+
+    button.num-btn[disabled] {
+      pointer-events: none;
+      color: #a5d6a7;
+    }
+    button#startBtn[disabled] {
+      visibility: hidden;
+    }
+
+    #timer {
+      font-size: 1.3rem;
+      margin-top: 1rem;
+    }
+
+    #result {
+      margin-top: 1rem;
+      font-size: 1.4rem;
+      font-weight: bold;
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+  </style>
+</head>
+<body>
+  <h1>Знайди три числа, які у добутку утворюють куб</h1>
+  <div id="message"></div>
+  <div id="numbers"></div>
+  <div id="controls">
+    <button id="startBtn">Почати</button>
+    <div id="timer">⏳ 03:00</div>
+  </div>
+  <div id="result"></div>
+
+  <script>
+    const numbers = [2, 7, 3, 6, 4, 8];
+    const correctProduct = 64; // 4^3
+    const timerDisplay = document.getElementById('timer');
+    const message = document.getElementById('message');
+    const result = document.getElementById('result');
+    const startBtn = document.getElementById('startBtn');
+    const numbersContainer = document.getElementById('numbers');
+
+    let timeLeft = 180;
+    let timer;
+    let selected = [];
+    let gameStarted = false;
+    let hideMessageTimeout;
+
+    function playSound(type){
+      try{
+        const actx = new (window.AudioContext||window.webkitAudioContext)();
+        const o = actx.createOscillator();
+        const g = actx.createGain();
+        o.connect(g); g.connect(actx.destination);
+        g.gain.value = 0.0001;
+        const now = actx.currentTime;
+        if(type==='ok'){
+          o.frequency.setValueAtTime(880, now);
+          o.frequency.exponentialRampToValueAtTime(1320, now+0.12);
+          g.gain.exponentialRampToValueAtTime(0.12, now+0.01);
+          g.gain.exponentialRampToValueAtTime(0.0001, now+0.3);
+        }else if(type==='err'){
+          o.frequency.setValueAtTime(220, now);
+          g.gain.exponentialRampToValueAtTime(0.12, now+0.01);
+          o.frequency.exponentialRampToValueAtTime(110, now+0.12);
+          g.gain.exponentialRampToValueAtTime(0.0001, now+0.4);
+        }else if(type==='win'){
+          const freqs=[660,880,990];
+          freqs.forEach((f,i)=>{
+            const o2 = actx.createOscillator(); const g2 = actx.createGain(); o2.connect(g2); g2.connect(actx.destination);
+            o2.frequency.value = f; g2.gain.value = 0.0001;
+            const st = now + i*0.12;
+            o2.start(st); o2.stop(st+0.18);
+            g2.gain.exponentialRampToValueAtTime(0.14, st+0.01);
+            g2.gain.exponentialRampToValueAtTime(0.0001, st+0.18);
+          });
+          o.stop(now+0.001);
+          return;
+        }
+        o.start(now); o.stop(now+0.32);
+      }catch(e){}
+    }
+
+    function renderButtons() {
+      numbersContainer.innerHTML = '';
+      numbers.forEach(num => {
+        const btn = document.createElement('button');
+        btn.textContent = num;
+        btn.className = 'num-btn';
+        btn.disabled = !gameStarted;
+        btn.onclick = () => selectNumber(btn, num);
+        numbersContainer.appendChild(btn);
+      });
+    }
+
+    function startGame() {
+      gameStarted = true;
+      startBtn.disabled = true;
+      message.textContent = 'Гра почалась!';
+      renderButtons();
+      timer = setInterval(updateTimer, 1000);
+    }
+
+    function updateTimer() {
+      timeLeft--;
+      if (timeLeft <= 0) {
+        clearInterval(timer);
+        message.textContent = '⏰ Час вийшов!';
+        disableAll();
+      }
+      const min = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+      const sec = String(timeLeft % 60).padStart(2, '0');
+      timerDisplay.textContent = `⏳ ${min}:${sec}`;
+    }
+
+    function selectNumber(btn, num) {
+      if (!gameStarted) return;
+      playSound('ok');
+
+      if (!selected.includes(num)) {
+        selected.push(num);
+        btn.classList.add('active');
+      }
+
+      if (selected.length === 3) {
+        const product = selected.reduce((a, b) => a * b, 1);
+        result.textContent = `Добуток: ${product}`;
+        result.style.opacity = 1;
+
+        setTimeout(() => {
+          checkResult(product);
+          result.style.opacity = 0;
+          if (product !== correctProduct) resetSelection();
+        }, 1500);
+      }
+    }
+
+    function checkResult(product) {
+      clearTimeout(hideMessageTimeout);
+
+      if (product === correctProduct) {
+        playSound('win');
+        clearInterval(timer);
+        message.textContent = `🎉 Вітаємо! Ви знайшли правильні числа! Залишилось часу: ${timerDisplay.textContent}`;
+        confetti();
+        disableAll();
+      } else {
+        playSound('err');
+        message.textContent = '❌ Неправильно! -10 секунд';
+        timeLeft = Math.max(0, timeLeft - 10);
+
+        hideMessageTimeout = setTimeout(() => {
+          message.textContent = '';
+        }, 2000);
+      }
+    }
+
+    function resetSelection() {
+      selected = [];
+      document.querySelectorAll('.num-btn').forEach(b => b.classList.remove('active'));
+    }
+
+    function disableAll() {
+      document.querySelectorAll('.num-btn').forEach(b => (b.disabled = true));
+    }
+
+    function confetti() {
+      const canvas = document.createElement('canvas');
+      document.body.appendChild(canvas);
+      const ctx = canvas.getContext('2d');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const pieces = Array.from({ length: 80 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * -canvas.height,
+        r: Math.random() * 6 + 2,
+        c: `hsl(${Math.random() * 360}, 70%, 60%)`,
+        s: Math.random() * 3 + 2
+      }));
+
+      let frame = 0;
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        pieces.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = p.c;
+          ctx.fill();
+        });
+      }
+
+      function update() {
+        pieces.forEach(p => {
+          p.y += p.s;
+        });
+        frame++;
+      }
+
+      function loop() {
+        if (frame < 60) {
+          draw();
+          update();
+          requestAnimationFrame(loop);
+        } else {
+          canvas.remove();
+        }
+      }
+
+      loop();
+    }
+
+    renderButtons();
+    startBtn.addEventListener('click', startGame);
+  </script>
+</body>
+</html>

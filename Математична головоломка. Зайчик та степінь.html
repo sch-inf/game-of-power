@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Головоломка — Зайчик і Замок</title>
+<style>
+  :root {
+    --cell:60px;
+    --gap:6px;
+    --board-bg:#ffdff3;
+    --cell-bg:#f5aee0;
+    --visited:#9fd79a;
+    --accent:#6b3fa0;
+  }
+  body {
+    font-family: Inter, system-ui, sans-serif;
+    background: linear-gradient(180deg,#fff,#fff7fb);
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; margin: 0; color:#222;
+  }
+  .wrap { display:flex; flex-direction:column; gap:12px; align-items:center; }
+  .story {
+    background:#ffffffcc; padding:10px 14px; border-radius:10px;
+    font-weight:600; box-shadow:0 6px 18px rgba(10,10,10,0.06);
+    text-align:center; max-width:760px;
+  }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(8,var(--cell));
+    grid-auto-rows: var(--cell);
+    gap: var(--gap);
+    background: var(--board-bg);
+    padding:12px; border-radius:12px; position:relative;
+    box-shadow:0 10px 30px rgba(20,10,20,0.06);
+  }
+  .cell {
+    display:flex; align-items:center; justify-content:center;
+    background:var(--cell-bg); border-radius:8px;
+    font-weight:700; cursor:pointer; user-select:none;
+    transition:transform .22s, background .3s;
+  }
+  .cell.start { background: var(--visited); box-shadow:0 0 10px 3px rgba(46,204,113,0.14); }
+  .cell.end { background:#d4b3ff; }
+  .cell.visited { background: var(--visited); }
+  .cell.current {
+    outline: 3px solid #27ae60;
+    transform: scale(1.08);
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow:0 0 12px 3px rgba(39,174,96,0.12); }
+    50% { box-shadow:0 0 20px 6px rgba(46,204,113,0.14); }
+  }
+  .cell.error { animation: shake 0.45s; }
+  @keyframes shake {
+    0%,100%{transform:translateX(0);}25%{transform:translateX(-5px);}50%{transform:translateX(5px);}75%{transform:translateX(-3px);}
+  }
+  .rabbit {
+    position:absolute; width:44px; height:44px; font-size:34px;
+    pointer-events:none; transition:top .25s,left .25s;
+  }
+  .hud { display:flex; gap:12px; font-weight:700; margin-top:4px; align-items:center; }
+  .hud div { background:#fff; padding:6px 10px; border-radius:8px; }
+  .btn {
+    background:var(--accent); color:white; border:0; border-radius:8px;
+    padding:8px 12px; font-weight:700; cursor:pointer;
+  }
+  .confetti { position:fixed; inset:0; pointer-events:none; overflow:hidden; }
+  .confetti-piece {
+    position:absolute; width:10px; height:14px; border-radius:2px; opacity:0;
+    animation: confettiFall linear forwards;
+  }
+  @keyframes confettiFall {
+    0%{transform:translateY(-10vh) rotate(0);opacity:1;}
+    100%{transform:translateY(110vh) rotate(720deg);opacity:0;}
+  }
+  .hint {
+    position:absolute; pointer-events:none; padding:6px 12px; border-radius:8px;
+    background:#fff; color:#111; border:1px solid rgba(0,0,0,0.08);
+    font-weight:700; font-size:15px; box-shadow:0 4px 14px rgba(0,0,0,0.1);
+    opacity:0; transform:translateY(-8px); transition:opacity .2s, transform .2s;
+  }
+  .hint.show { opacity:1; transform:translateY(-16px); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="story">🐇 <strong>Кролик шукає шлях до чарівного замку!</strong> Наступай лише на клітинки, які є квадратами чисел. Маєш 3 хвилини!</div>
+    <div class="hud">
+      <div id="timer">⏱️ 3:00</div>
+      <div id="steps">Кроків: 0</div>
+      <button class="btn" id="reset">🔄 Скинути</button>
+    </div>
+    <div class="board" id="board"></div>
+  </div>
+  <div class="confetti" id="confetti"></div>
+  <div class="hint" id="hint"></div>
+
+<script>
+const grid = [
+[40, 58, 67, 76, 121, 36, 16, 100],
+[14, 25, 23, 256, 83, 143, 34, 76],
+[100, 44, 225, 45, 36, 169, 121, 36],
+[25, 81, 49, 16, 49, 20, 4, 58],
+[36, 220, 88, 53, 46, 30, 81, 55],
+[41, 121, 67, 33, 65, 49, 94, 11],
+[144, 14, 64, 54, 62, 9, 18, 17],
+[81, 85, 76, 25, 36, 44, 82, 39]
+];
+const perfectSquares = new Set([1,4,9,16,25,36,49,64,81,100,121,144,169,196,225,256]);
+const board = document.getElementById('board');
+const timerEl = document.getElementById('timer');
+const stepsEl = document.getElementById('steps');
+const confetti = document.getElementById('confetti');
+const hint = document.getElementById('hint');
+
+let rabbit = {row:7,col:0};
+const castle = {row:0,col:7};
+let timeLeft = 180, steps = 0, timer=null, started=false;
+
+function render() {
+  board.innerHTML = '';
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      const cell=document.createElement('div');
+      cell.className='cell';
+      cell.textContent=grid[r][c];
+      cell.dataset.r=r; cell.dataset.c=c;
+      if(r===7&&c===0) cell.classList.add('start','visited');
+      if(r===0&&c===7) cell.classList.add('end');
+      board.appendChild(cell);
+    }
+  }
+  const rabbitEl=document.createElement('div');
+  rabbitEl.id='rabbit'; rabbitEl.className='rabbit'; rabbitEl.textContent='🐰';
+  board.appendChild(rabbitEl);
+  moveRabbit();
+}
+function moveRabbit(){
+  const rEl=document.getElementById('rabbit');
+  const size=60, gap=6, pad=12;
+  rEl.style.left=(rabbit.col*(size+gap)+pad+(size-44)/2)+'px';
+  rEl.style.top=(rabbit.row*(size+gap)+pad+(size-44)/2)+'px';
+  highlightCurrent();
+}
+function highlightCurrent(){
+  document.querySelectorAll('.cell').forEach(c=>c.classList.remove('current'));
+  const cur=document.querySelector(`.cell[data-r="${rabbit.row}"][data-c="${rabbit.col}"]`);
+  if(cur) cur.classList.add('current');
+}
+function startTimer(){
+  if(timer) return;
+  timer=setInterval(()=>{
+    timeLeft--;
+    const m=Math.floor(timeLeft/60), s=String(timeLeft%60).padStart(2,'0');
+    timerEl.textContent=`⏱️ ${m}:${s}`;
+    if(timeLeft<=0){ clearInterval(timer); alert("⏰ Час вийшов!"); resetGame(); }
+  },1000);
+}
+function playSound(type){
+  try{
+    const actx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.connect(g); g.connect(actx.destination);
+    g.gain.value = 0.0001;
+    const now = actx.currentTime;
+    if(type==='ok'){
+      o.frequency.setValueAtTime(880, now);
+      o.frequency.exponentialRampToValueAtTime(1320, now+0.12);
+      g.gain.exponentialRampToValueAtTime(0.12, now+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, now+0.3);
+    }else if(type==='err'){
+      o.frequency.setValueAtTime(220, now);
+      g.gain.exponentialRampToValueAtTime(0.12, now+0.01);
+      o.frequency.exponentialRampToValueAtTime(110, now+0.12);
+      g.gain.exponentialRampToValueAtTime(0.0001, now+0.4);
+    }else if(type==='win'){
+      const freqs=[660,880,990];
+      freqs.forEach((f,i)=>{
+        const o2 = actx.createOscillator(); const g2 = actx.createGain(); o2.connect(g2); g2.connect(actx.destination);
+        o2.frequency.value = f; g2.gain.value = 0.0001;
+        const st = now + i*0.12;
+        o2.start(st); o2.stop(st+0.18);
+        g2.gain.exponentialRampToValueAtTime(0.14, st+0.01);
+        g2.gain.exponentialRampToValueAtTime(0.0001, st+0.18);
+      });
+      o.stop(now+0.001);
+      return;
+    }
+    o.start(now); o.stop(now+0.32);
+  }catch(e){}
+}
+function throwConfetti(){
+  for(let i=0;i<60;i++){
+    const p=document.createElement('div');
+    p.className='confetti-piece';
+    p.style.left=Math.random()*100+'%';
+    p.style.background=`hsl(${Math.random()*360},70%,60%)`;
+    p.style.animationDuration=(1.6+Math.random()*1.4)+'s';
+    confetti.appendChild(p);
+    setTimeout(()=>p.remove(),3000);
+  }
+}
+function showHint(val,cell){
+  const rect=cell.getBoundingClientRect();
+  hint.textContent=`${val} = ${Math.round(Math.sqrt(val))}²`;
+  hint.style.left=(rect.left+rect.width/2)+'px';
+  hint.style.top=(rect.top-24)+'px';
+  hint.classList.add('show');
+  setTimeout(()=>hint.classList.remove('show'),1000);
+}
+function handleClick(e){
+  const cell=e.target.closest('.cell'); if(!cell) return;
+  const r=+cell.dataset.r, c=+cell.dataset.c, val=grid[r][c];
+  if(!started){ started=true; startTimer(); }
+  const dr=Math.abs(r-rabbit.row), dc=Math.abs(c-rabbit.col);
+  steps++; stepsEl.textContent=`Кроків: ${steps}`;
+  if(dr<=1 && dc<=1 && (dr+dc>0) && perfectSquares.has(val)){
+    rabbit={row:r,col:c};
+    cell.classList.add('visited');
+    moveRabbit(); playSound('ok'); showHint(val,cell);
+    if(r===castle.row && c===castle.col){
+      clearInterval(timer); throwConfetti(); playSound('win');
+      setTimeout(()=>alert(`🎉 Молодець! Ти дійшов до замку за ${steps} кроків!`),200);
+    }
+  } else {
+    cell.classList.add('error');
+    setTimeout(()=>cell.classList.remove('error'),400);
+    playSound('err');
+    timeLeft=Math.max(0,timeLeft-10);
+  }
+}
+function resetGame(){
+  clearInterval(timer); timer=null;
+  rabbit={row:7,col:0}; steps=0; started=false; timeLeft=180;
+  timerEl.textContent='⏱️ 3:00'; stepsEl.textContent='Кроків: 0';
+  confetti.innerHTML=''; render();
+}
+render();
+board.addEventListener('click',handleClick);
+document.getElementById('reset').addEventListener('click',resetGame);
+</script>
+</body>
+</html>
